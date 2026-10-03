@@ -1,0 +1,13 @@
+{
+  "name": "Номера",
+  "short_name": "Номера",
+  "description": "Коллекционная игра о российских автомобильных номерах",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#050506",
+  "theme_color": "#050506",
+  "icons": [{"src":"./icon.png", "sizes":"1024x1024", "type":"image/png", "purpose":"any"}]
+}

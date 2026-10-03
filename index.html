@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050506">
+  <meta name="description" content="Коллекционная игра про российские автомобильные номера. Открывайте сочетания, оценивайте редкость и собирайте свой гараж.">
+  <title>Номера — коллекция</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.png">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><div class="ambient-glow"></div><div class="rarity-flash"></div><div class="gold-particles"></div></div>
+  <main class="game-shell" id="game" data-phase="idle" data-rarity="common">
+    <header class="game-header">
+      <button class="icon-button menu-button" type="button" data-action="menu" aria-label="Открыть меню">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      </button>
+      <h1 class="wordmark">НОМЕРА</h1>
+      <div class="balance-block"><span class="eyebrow">БАЛАНС</span><strong id="balance">0 ₽</strong></div>
+    </header>
+    <section class="game-main" aria-label="Генерация номера">
+      <div class="rarity-bar" id="rarity-bar">
+        <div class="rarity-level"><span id="rarity-name" data-testid="rarity-label">Обычный</span><div class="rarity-segments" id="rarity-segments" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div>
+        <strong id="price" data-testid="price-value">0 ₽</strong>
+      </div>
+      <div class="reel-stage" id="reel-stage" aria-label="Российский регистрационный номер"><div class="reel-strip" id="reel-strip"></div></div>
+      <div class="reveal-area"><p class="game-status" id="status"><span></span>Каждый номер — новая история</p><div class="traits" id="traits" aria-live="polite"></div><p class="first-hint" id="first-hint">Откройте характеристики.<br>Продайте номер или сохраните в коллекции.</p></div>
+    </section>
+    <footer class="game-footer">
+      <div id="generate-controls">
+        <button class="primary-button generate-button" type="button" id="generate-button" data-action="generate" disabled><span class="button-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 19V5m0 0L3 9m4-4 4 4m6-4v14m0 0-4-4m4 4 4-4"/></svg><span id="generate-label">Получить номер</span></span><span id="roll-cost">— ₽</span></button>
+        <button class="recovery-button" type="button" data-action="recovery" id="recovery-button" hidden>Получить стартовый резерв</button>
+      </div>
+      <div id="resolve-controls" hidden><div class="resolve-row"><button class="secondary-button" type="button" id="keep-button" data-action="keep"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="13" rx="2"/><path d="M8 4h8M10 1h4"/></svg>Оставить</button><button class="primary-button sell-button" type="button" id="sell-button" data-action="sell"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg>Продать</button></div><p class="sale-hint" id="sale-hint"></p></div>
+      <button class="country-button" id="country-button" type="button" data-action="country"><span class="country-label"><span class="flag-icon" aria-hidden="true"><i></i><i></i><i></i></span><span>Россия</span></span><span class="country-meta">3 типа <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg></span></button>
+    </footer>
+  </main>
+  <aside class="record-toast" id="record-toast" data-testid="record-toast" hidden aria-live="polite"></aside>
+  <div class="notification" id="notification" role="status" hidden></div>
+  <dialog id="app-dialog" class="app-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <noscript><p class="noscript">Для игры включите JavaScript в браузере.</p></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
