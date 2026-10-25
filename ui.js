@@ -44,7 +44,7 @@ function icon(name) {
 
 export class GameUI {
   constructor() {
-    this.elements = Object.fromEntries(['game', 'balance', 'rarity-name', 'rarity-segments', 'price', 'reel-stage', 'reel-strip', 'traits', 'status', 'generate-controls', 'resolve-controls', 'generate-button', 'generate-label', 'roll-cost', 'sale-hint', 'recovery-button', 'first-hint', 'record-toast', 'notification', 'app-dialog', 'dialog-content'].map(id => [id, document.getElementById(id)]));
+    this.elements = Object.fromEntries(['game', 'balance', 'rarity-name', 'rarity-segments', 'price', 'reel-stage', 'reel-strip', 'traits', 'status', 'generate-controls', 'resolve-controls', 'generate-button', 'generate-label', 'roll-cost', 'sale-hint', 'recovery-button', 'first-hint', 'skip-hint', 'record-toast', 'notification', 'app-dialog', 'dialog-content'].map(id => [id, document.getElementById(id)]));
     this.state = null;
     this.rolling = false;
     this._plateKey = '';
@@ -103,8 +103,11 @@ export class GameUI {
     el['resolve-controls'].hidden = !state.canResolve;
     el['generate-label'].textContent = phase === 'rolling' ? 'Ищем ваш номер' : ['selected', 'revealing', 'valuating', 'finishing'].includes(phase) ? 'Оценка номера' : 'Получить номер';
     el['roll-cost'].textContent = formatMoney(Config.rollCost);
-    el['recovery-button'].hidden = !state.recoveryAvailable;
+    el['recovery-button'].hidden = !(state.recoveryVisible ?? state.recoveryAvailable);
+    el['recovery-button'].disabled = !state.recoveryAvailable;
     el['recovery-button'].textContent = state.recoveryText ?? 'Получить стартовый резерв';
+    el['skip-hint'].classList.toggle('visible', !!state.canSkip && progress.numberOfRolls > 0);
+    el['reel-stage'].classList.toggle('skippable', !!state.canSkip);
     el['sale-hint'].textContent = `Продажа добавит ${formatMoney(state.currentPlate?.finalPrice ?? 0)} к балансу`;
     el['first-hint'].hidden = phase !== 'idle' || progress.numberOfRolls > 0;
     const status = state.statusText ?? ({ idle: 'Каждый номер — новая история', rolling: 'Ищем ваш следующий номер', selected: 'Номер найден. Начинаем оценку', revealing: 'Раскрываем особенности', valuating: 'Раскрываем особенности', finishing: 'Финальная оценка', completed: 'Продать или сохранить в коллекции?' }[phase] ?? '');
@@ -221,20 +224,46 @@ export class GameUI {
   openMenu({ collection, settings, record }) {
     const progress = this.state?.progress;
     const menuCard = (name, title, caption, action) => `<button class="menu-card" type="button" data-action="${action}"><span class="menu-icon">${icon(name)}</span><span class="menu-card-copy"><strong>${title}</strong><small>${caption}</small></span><span class="menu-arrow">›</span></button>`;
-    this._openDialog('menu', 'Ваш гараж', `<div class="menu-grid">${menuCard('collection', 'Мои номера', `${progress?.collection.length ?? 0} в коллекции`, 'collection')}${menuCard('record', 'Самый ценный номер', formatMoney(progress?.highestPrice ?? 0), 'back-record')}${menuCard('settings', 'Настройки', 'Звук, вибрация и эффекты', 'settings')}</div><p class="section-label">История коллекции</p><div class="stats-grid"><div class="stat-card"><span>Открыто номеров</span><strong>${progress?.numberOfRolls ?? 0}</strong></div><div class="stat-card"><span>Продано на сумму</span><strong>${formatMoney(progress?.totalEarned ?? 0)}</strong></div></div>`);
+    this._openDialog('menu', 'Ваш гараж', `<div class="menu-grid">${menuCard('collection', 'Мои номера', `${progress?.collection.length ?? 0} в коллекции`, 'collection')}${menuCard('record', 'Самый ценный номер', formatMoney(progress?.highestPrice ?? 0), 'back-record')}${menuCard('settings', 'Настройки', 'Звук, вибрация и эффекты', 'settings')}</div><p class="section-label">История коллекции</p><div class="stats-grid"><div class="stat-card"><span>Открыто номеров</span><strong>${progress?.numberOfRolls ?? 0}</strong></div><div class="stat-card"><span>Продано на сумму</span><strong>${formatMoney(progress?.totalEarned ?? 0)}</strong></div></div>${this._rarityStats(progress)}`);
     $('[data-action="collection"]', this.elements['app-dialog']).onclick = collection;
     $('[data-action="settings"]', this.elements['app-dialog']).onclick = settings;
     $('[data-action="back-record"]', this.elements['app-dialog']).onclick = record;
   }
 
-  openCollection(progress, onSell) {
-    this._openDialog('collection', 'Мои номера', `<div class="filter-strip" aria-label="Фильтр редкости"><button class="filter-chip" data-filter="all" type="button">Все</button>${Rarities.map(rarity => `<button class="filter-chip" data-filter="${rarity.key}" style="--chip-color:${rarity.color};--chip-rgb:${rgb(rarity.color)}" type="button">${escapeHTML(rarity.label)}</button>`).join('')}</div><div class="sort-row" aria-label="Сортировка"><button class="sort-button" data-sort="newest" type="button">Новые</button><button class="sort-button" data-sort="valuable" type="button">Дорогие</button><button class="sort-button" data-sort="rarest" type="button">Редкие</button></div><div class="collection-list" id="collection-list"></div>`, `${progress.collection.length} в гараже · рекорд ${formatMoney(progress.highestPrice)}`);
+  _rarityStats(progress) {
+    const total = progress?.numberOfRolls ?? 0;
+    if (!total) return '';
+    return `<p class="section-label">Выпало по редкости</p><div class="rarity-stats">${Rarities.map(rarity => {
+      const count = progress.rarityStats?.[rarity.key] ?? 0;
+      const share = count / total * 100;
+      const percent = count && share < 0.1 ? '<0,1' : share.toFixed(share < 10 && share % 1 ? 1 : 0).replace('.', ',');
+      return `<div class="rarity-stat" style="--stat-color:${rarity.color};--stat-share:${Math.max(count ? 1.5 : 0, share)}%"><span class="rarity-stat-name">${escapeHTML(rarity.label)}</span><span class="rarity-stat-bar" aria-hidden="true"><i></i></span><strong>${count}</strong><small>${percent}%</small></div>`;
+    }).join('')}</div>`;
+  }
+
+  openCollection(progress, onSell, onSellMany = null) {
+    this._openDialog('collection', 'Мои номера', `<div class="filter-strip" aria-label="Фильтр редкости"><button class="filter-chip" data-filter="all" type="button">Все</button>${Rarities.map(rarity => `<button class="filter-chip" data-filter="${rarity.key}" style="--chip-color:${rarity.color};--chip-rgb:${rgb(rarity.color)}" type="button">${escapeHTML(rarity.label)}</button>`).join('')}</div><div class="sort-row" aria-label="Сортировка"><button class="sort-button" data-sort="newest" type="button">Новые</button><button class="sort-button" data-sort="valuable" type="button">Дорогие</button><button class="sort-button" data-sort="rarest" type="button">Редкие</button></div><div id="bulk-sell"></div><div class="collection-list" id="collection-list"></div>`, `${progress.collection.length} в гараже · стоимость ${formatMoney(progress.collection.reduce((sum, item) => sum + item.finalPrice, 0))}`);
     const render = () => {
       const currentProgress = this.state?.progress ?? progress;
       [...this.elements['app-dialog'].querySelectorAll('[data-filter]')].forEach(button => { button.classList.toggle('selected', button.dataset.filter === this.collectionFilter); button.setAttribute('aria-pressed', button.dataset.filter === this.collectionFilter); });
       [...this.elements['app-dialog'].querySelectorAll('[data-sort]')].forEach(button => { button.classList.toggle('selected', button.dataset.sort === this.collectionSort); button.setAttribute('aria-pressed', button.dataset.sort === this.collectionSort); });
       const values = currentProgress.collection.filter(result => this.collectionFilter === 'all' || result.rarity === this.collectionFilter).sort((left, right) => this.collectionSort === 'valuable' ? right.finalPrice - left.finalPrice : this.collectionSort === 'rarest' ? rarityInfo(right.rarity).rank - rarityInfo(left.rarity).rank || right.finalPrice - left.finalPrice : new Date(right.obtainedAt) - new Date(left.obtainedAt));
       const list = $('#collection-list');
+      const commons = currentProgress.collection.filter(result => result.rarity === 'common');
+      const bulk = $('#bulk-sell');
+      if (onSellMany && commons.length >= 2) {
+        const sum = commons.reduce((total, result) => total + result.finalPrice, 0);
+        bulk.innerHTML = `<button class="bulk-sell-button" type="button" data-action="bulk-sell">Продать все обычные · ${commons.length} шт. за ${formatMoney(sum)}</button><div id="bulk-confirm"></div>`;
+        $('[data-action="bulk-sell"]', bulk).onclick = () => {
+          $('#bulk-confirm').innerHTML = `<div class="sale-confirm" role="alert"><p>${commons.length} обычных номеров покинут гараж. На баланс поступит ${formatMoney(sum)}.</p><div class="confirm-row"><button class="secondary-button" data-action="cancel-bulk" type="button">Отмена</button><button class="primary-button" data-action="confirm-bulk" type="button">Продать</button></div></div>`;
+          $('[data-action="cancel-bulk"]', bulk).onclick = () => $('#bulk-confirm').replaceChildren();
+          $('[data-action="confirm-bulk"]', bulk).onclick = event => {
+            event.currentTarget.disabled = true;
+            try { onSellMany(commons.map(result => result.id)); this.openCollection(this.state?.progress ?? progress, onSell, onSellMany); }
+            catch (error) { this.notify(error.message ?? 'Не удалось продать номера'); event.currentTarget.disabled = false; }
+          };
+        };
+      } else bulk.replaceChildren();
       if (!values.length) {
         list.innerHTML = `<div class="empty-state"><span class="empty-icon" aria-hidden="true">▤</span><h3>${currentProgress.collection.length ? 'Таких номеров пока нет' : 'Начните свою коллекцию'}</h3><p>${currentProgress.collection.length ? 'Выберите другую редкость, чтобы увидеть номера в гараже.' : 'Получите номер и нажмите «Оставить».<br>Он останется здесь вместе с ценой и характеристиками.'}</p></div>`;
         return;
@@ -243,7 +272,7 @@ export class GameUI {
       [...list.querySelectorAll('[data-action="detail"]')].forEach(button => {
         button.onclick = () => {
           const result = values.find(value => value.id === button.dataset.plateId);
-          this.openDetail(result, { onSell: async () => { await onSell(result.id); this.openCollection(this.state?.progress ?? progress, onSell); } });
+          this.openDetail(result, { onSell: async () => { await onSell(result.id); this.openCollection(this.state?.progress ?? progress, onSell, onSellMany); } });
         };
       });
     };

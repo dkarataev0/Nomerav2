@@ -30,19 +30,34 @@ function canRoll() { return Boolean(store && state.phase === 'idle' && !state.pr
   && state.progress.balance >= Config.rollCost); }
 function canResolve() { return Boolean(store && state.phase === 'completed'
   && state.progress.pendingPlate && !state.progress.rollInFlight); }
-function recoveryAvailable() {
+function recoveryEligible() {
   const progress = state.progress;
-  return Boolean(store && progress.balance < Config.rollCost && !progress.pendingPlate && !progress.collection.length
-    && (!progress.lastRecoveryGrant || Date.now() - Date.parse(progress.lastRecoveryGrant) >= Config.recoveryCooldown * 1000));
+  return Boolean(store && progress.balance < Config.rollCost && !progress.pendingPlate && !progress.collection.length);
+}
+function recoveryWait() {
+  const granted = Date.parse(state.progress.lastRecoveryGrant ?? '');
+  return Number.isFinite(granted) ? Math.max(0, Config.recoveryCooldown * 1000 - (Date.now() - granted)) : 0;
+}
+function recoveryAvailable() { return recoveryEligible() && recoveryWait() === 0; }
+function waitLabel(milliseconds) {
+  const minutes = Math.max(1, Math.ceil(milliseconds / 60000));
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours} ч ${String(minutes % 60).padStart(2, '0')} мин` : `${minutes} мин`;
+}
+function idleStatus() {
+  const progress = state.progress;
+  if (progress.balance >= Config.rollCost) return 'Какой номер станет вашим?';
+  if (progress.collection.length) return 'Продайте номер из коллекции, чтобы продолжить';
+  return recoveryWait() ? 'Резерв скоро пополнит баланс' : 'Получите резерв, чтобы продолжить';
 }
 function render() {
   state.progress = store?.progress ?? emptyProgress;
-  const wait = Math.max(0, Config.recoveryCooldown * 1000
-    - (Date.now() - Date.parse(state.progress.lastRecoveryGrant ?? '1970-01-01')));
-  ui.update({ ...state, canRoll: canRoll(), canResolve: canResolve(), recoveryAvailable: recoveryAvailable(),
-    recoveryText: wait ? `Резерв через ${Math.ceil(wait / 3600000)} ч` : 'Получить стартовый резерв',
+  const wait = recoveryWait();
+  ui.update({ ...state, canRoll: canRoll(), canResolve: canResolve(), recoveryVisible: recoveryEligible(),
+    recoveryAvailable: recoveryAvailable(), canSkip: canSkip(),
+    recoveryText: wait ? `Резерв через ${waitLabel(wait)}` : `Получить резерв ${formatMoney(Config.recoveryGrant)}`,
     statusText: storageError ? storageError.message : {
-      idle: state.progress.balance < Config.rollCost ? 'Продайте номер из коллекции или получите резерв' : 'Какой номер станет вашим?',
+      idle: idleStatus(),
       rolling: 'Ищем следующий номер', selected: 'Номер найден. Начинаем оценку',
       revealing: 'Раскрываем особенности', valuating: 'Оцениваем коллекционную ценность',
       finishing: 'Финальная оценка', completed: 'Продать или сохранить в коллекции?',
@@ -117,11 +132,16 @@ async function reveal(result, signal) {
     state.legendaryPulse = false; render();
   }
   await sleep(Config.finishingDuration * timingScale, signal);
+  finish(result);
+}
+function finish(result) {
+  // The very first appraisal and plain plates are not worth a celebration.
+  const celebrate = state.progress.highestPrice > 0 && rarityInfo(result.rarity).rank > 0;
   let newRecord;
   try { newRecord = store.completeRoll(); }
   catch (error) { state.phase = 'selected'; render(); report(error); return; }
   state.phase = 'completed'; render();
-  if (newRecord) {
+  if (newRecord && celebrate) {
     feedback.play('record'); feedback.haptic('record');
     clearTimeout(recordTimer);
     ui.showRecord(result, () => openDetail(result));
@@ -135,8 +155,8 @@ function begin(result) {
   // No await occurs before the durable transaction and phase lock.
   state.phase = 'rolling'; state.currentPlate = result; state.revealedTraits = [];
   state.displayPrice = 0; state.displayRarity = 'common'; state.legendaryPulse = false;
-  configureFeedback(); void feedback.unlock(); feedback.play('buttonTap'); feedback.haptic('tap'); render();
   const run = new AbortController(); activeRun = run;
+  configureFeedback(); void feedback.unlock(); feedback.play('buttonTap'); feedback.haptic('tap'); render();
   const plates = [previousPlate];
   for (let index = 0; index < Math.max(4, Config.rollPlateCount); index++) plates.push(generatePlate());
   plates.push(result.plate);
@@ -153,6 +173,22 @@ function begin(result) {
     finally { if (activeRun === run) { activeRun = null; resumeTask = null; } }
   })();
 }
+function canSkip() {
+  return Boolean(activeRun && state.currentPlate && state.progress.rollInFlight
+    && state.progress.pendingPlate?.id === state.currentPlate.id && isBusy());
+}
+/** Results are fixed before the animation starts, so skipping only shortens the show. */
+function skip() {
+  if (!canSkip()) return;
+  const result = state.currentPlate;
+  activeRun.abort(); activeRun = null; resumeTask = null;
+  feedback.stop();
+  previousPlate = result.plate; ui.setPlate(result.plate);
+  state.revealedTraits = result.traits; state.displayPrice = result.finalPrice; state.legendaryPulse = false;
+  feedback.play('rollStop'); feedback.haptic('rollStop');
+  changeRarity(result.rarity);
+  finish(result);
+}
 function roll() {
   if (!canRoll()) return;
   const variation = Config.variationRange[0] + Math.random() * (Config.variationRange[1] - Config.variationRange[0]);
@@ -162,6 +198,7 @@ function resolvePending(keep) {
   if (!canResolve()) return;
   try {
     if (keep) store.keepPending(); else store.sellPending();
+    clearTimeout(recordTimer); ui.hideRecord();
     state.phase = 'idle'; feedback.play('buttonTap'); feedback.haptic('tap'); render();
     ui.notify(keep ? 'Номер сохранён в коллекции' : `Продано за ${formatMoney(state.currentPlate.finalPrice)}`);
   } catch (error) { report(error); }
@@ -181,8 +218,8 @@ function resume() {
     state.phase = 'completed'; state.displayPrice = pending.finalPrice;
     state.displayRarity = pending.rarity; state.revealedTraits = pending.traits; render(); return;
   }
-  state.phase = 'selected'; state.displayPrice = 0; state.displayRarity = 'common'; state.revealedTraits = []; render();
   const run = new AbortController(); activeRun = run;
+  state.phase = 'selected'; state.displayPrice = 0; state.displayRarity = 'common'; state.revealedTraits = []; render();
   resumeTask = reveal(pending, run.signal).catch(error => { if (error.name !== 'AbortError') report(error); })
     .finally(() => { if (activeRun === run) { activeRun = null; resumeTask = null; } });
 }
@@ -197,7 +234,14 @@ function sellCollected(id) {
   catch (error) { report(error); throw error; }
   return store.progress;
 }
-function openCollection() { ui.openCollection(state.progress, sellCollected); }
+function sellMany(ids) {
+  try {
+    const earned = store.sellCollectedMany(ids); render(); feedback.play('buttonTap'); feedback.haptic('tap');
+    ui.notify(`Продано на ${formatMoney(earned)}`);
+  } catch (error) { report(error); throw error; }
+  return store.progress;
+}
+function openCollection() { ui.openCollection(state.progress, sellCollected, sellMany); }
 function reset() {
   suspend();
   try {
@@ -233,17 +277,31 @@ document.addEventListener('click', event => {
     catch (error) { report(error); }
   }
 });
+document.getElementById('reel-stage').addEventListener('click', () => { void feedback.unlock(); skip(); });
+document.addEventListener('keydown', event => {
+  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || ui.elements['app-dialog'].open) return;
+  if (event.target instanceof Element && event.target.closest('button, input, select, textarea, a, [contenteditable]')) return;
+  const code = event.code;
+  if (code === 'Space' || code === 'Enter') {
+    event.preventDefault(); void feedback.unlock();
+    if (canRoll()) roll(); else skip();
+  } else if (canResolve() && (code === 'KeyK' || code === 'ArrowLeft')) { void feedback.unlock(); resolvePending(true); }
+  else if (canResolve() && (code === 'KeyS' || code === 'ArrowRight')) { void feedback.unlock(); resolvePending(false); }
+});
+// Keep the reserve countdown honest while the page stays open.
+setInterval(() => { if (!document.hidden && recoveryEligible()) render(); }, 30000);
 document.addEventListener('visibilitychange', () => document.hidden ? suspend() : resume());
 window.addEventListener('pagehide', suspend);
 window.addEventListener('pageshow', resume);
 function startingPlate() { return { letters: 'АОО', digits: '001', region: Regions.find(region => region.code === '77'), type: 'standard' }; }
-let previousPlate = store?.progress.pendingPlate?.plate ?? store?.progress.recordPlate?.plate ?? startingPlate();
+let previousPlate = store?.progress.pendingPlate?.plate ?? startingPlate();
 ui.setPlate(previousPlate); configureFeedback(); render(); resume();
 if (storageError) report(storageError);
 else if (store.loadWarning) ui.notify(store.loadWarning);
 
 if (localDebug) window.__game = {
   get state() { return { ...state, progress: store?.progress ?? emptyProgress }; }, config: Config,
+  skip,
   forceRarity: rarity => { if (canRoll()) begin(evaluatePlate(generatePlate(rarity))); },
   forceReference: second => { if (canRoll()) begin(evaluatePlate({ letters: second ? 'АОО' : 'ЕЕЕ', digits: second ? '770' : '222',
     region: Regions.find(region => region.code === (second ? '77' : '52')), type: 'standard' })); },

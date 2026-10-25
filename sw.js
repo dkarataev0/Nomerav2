@@ -1,4 +1,4 @@
-const VERSION = 'nomera-v2-web-1';
+const VERSION = 'nomera-v2-web-2';
 const ASSETS = ['.', './index.html', './styles.css', './app.js', './ui.js', './core.js',
   './game-data.js', './storage.js', './feedback.js', './favicon.svg', './icon.png', './manifest.webmanifest'];
 self.addEventListener('install', event => {

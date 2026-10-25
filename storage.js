@@ -252,6 +252,23 @@ export class GameStore {
     });
   }
 
+  /** Sells several collected plates in one persisted transaction. */
+  sellCollectedMany(ids) {
+    const wanted = new Set(ids);
+    if (!this.#progress.collection.some(plate => wanted.has(plate.id))) return 0;
+    return this.#transact(progress => {
+      let earned = 0;
+      progress.collection = progress.collection.filter(plate => {
+        if (!wanted.has(plate.id)) return true;
+        earned += plate.finalPrice;
+        return false;
+      });
+      progress.balance += earned;
+      progress.totalEarned += earned;
+      return earned;
+    });
+  }
+
   updateSettings(settings) {
     return this.#transact(progress => {
       for (const key of SETTINGS) if (Object.hasOwn(settings, key)) progress.settings[key] = settings[key];
